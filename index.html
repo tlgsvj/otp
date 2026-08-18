@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>VJGS OTP/OTA Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand"><span class="logo">VJGS</span><div>LOAD CONTROL<small>OTP/OTA STATIC WEB BUILD</small></div></div>
+    <div id="loadStatus" class="load-status">Ready</div>
+    <div id="clock" class="clock"></div>
+  </div>
+  <div class="layout">
+    <aside class="sidebar">
+      <button class="collapseBtn" id="collapseBtn">☰ <span class="collapseText">Điều hướng</span></button>
+      <div class="side-title">REPORT MENU</div>
+      <div class="navitem active" data-tab="overview"><span class="ico">🏠</span><div class="navtext">Overview<small>Daily summary</small></div></div>
+      <div class="navitem" data-tab="otpVj"><span class="ico">📊</span><div class="navtext">OTP VietJet<small>ETD1, ETD15, STD</small></div></div>
+      <div class="navitem" data-tab="otaVj"><span class="ico">🛬</span><div class="navtext">OTA VietJet<small>STA based</small></div></div>
+      <div class="navitem" data-tab="door"><span class="ico">🚪</span><div class="navtext">Door Closed<small>Early 5 minutes</small></div></div>
+      <div class="navitem" data-tab="other"><span class="ico">✈</span><div class="navtext">Other Carrier<small>ETD1 included</small></div></div>
+      <div class="navitem" data-tab="input"><span class="ico">✍</span><div class="navtext">OTP Input<small>Smart entry</small></div></div>
+      <div class="navitem" data-tab="analysis"><span class="ico">🔎</span><div class="navtext">Delay Analysis<small>Reason & trend</small></div></div>
+      <div class="navitem" data-tab="export"><span class="ico">📤</span><div class="navtext">Export<small>CSV</small></div></div>
+    </aside>
+    <main class="content">
+      <section id="overview" class="tab active"></section>
+      <section id="otpVj" class="tab"></section>
+      <section id="otaVj" class="tab"></section>
+      <section id="door" class="tab"></section>
+      <section id="other" class="tab"></section>
+      <section id="input" class="tab"></section>
+      <section id="analysis" class="tab"></section>
+      <section id="export" class="tab"></section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
