@@ -1,12 +1,25 @@
+function todayISO() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 const CONFIG = {
   dataIndex: './DataOTP/otp_2026_index.json',
-  defaultFrom: '2026-08-14',
-  defaultTo: '2026-08-14',
+  defaultFrom: todayISO(),
+  defaultTo: todayISO(),
+  ytdFrom: `${new Date().getFullYear()}-01-01`,
   storageKey: 'vjgs_otp_static_edits_v1',
-  version: '2026-08-18-delay-analysis-pagination-v5'
+  version: '2026-08-18-date-sync-pagination-v6'
 };
 
 const DOMESTIC = new Set('DIN THD VDH VCL TBB PXU BMV VKG CAH VCS HAN SGN DAD VDO HPH VII HUI CXR DLI UIH VCA PQC LTH'.split(' '));
+
+function defaultFilter(extra = {}) {
+  return { from: CONFIG.defaultFrom, to: CONFIG.defaultTo, market: 'All', origin: 'All', dest: 'All', type: 'All', quick: '', ...extra };
+}
 
 const state = {
   activeTab: 'overview',
@@ -17,13 +30,13 @@ const state = {
   loadedRange: null,
   tablePages: {},
   filters: {
-    overview: { from: CONFIG.defaultFrom, to: CONFIG.defaultTo, market: 'All', origin: 'All', dest: 'All', type: 'All', quick: '' },
-    otpVj: { from: CONFIG.defaultFrom, to: CONFIG.defaultTo, market: 'All', origin: 'All', dest: 'All', type: 'All', quick: '' },
-    otaVj: { from: CONFIG.defaultFrom, to: CONFIG.defaultTo, market: 'All', origin: 'All', dest: 'All', type: 'All', quick: '' },
-    door: { from: CONFIG.defaultFrom, to: CONFIG.defaultTo, market: 'All', origin: 'All', dest: 'All', type: 'All', quick: '' },
-    other: { from: CONFIG.defaultFrom, to: CONFIG.defaultTo, market: 'All', origin: 'All', dest: 'All', airline: 'All', quick: '' },
-    analysis: { from: CONFIG.defaultFrom, to: CONFIG.defaultTo, market: 'All', origin: 'All', dest: 'All', type: 'All', quick: '' },
-    export: { from: CONFIG.defaultFrom, to: CONFIG.defaultTo, market: 'All', origin: 'All', dest: 'All', type: 'All', quick: '' }
+    overview: defaultFilter(),
+    otpVj: defaultFilter(),
+    otaVj: defaultFilter(),
+    door: defaultFilter(),
+    other: defaultFilter({ airline: 'All', type: undefined }),
+    analysis: defaultFilter(),
+    export: defaultFilter()
   },
   inputDate: CONFIG.defaultTo
 };
@@ -48,6 +61,22 @@ function saveLocalEdits() {
   localStorage.setItem(CONFIG.storageKey, JSON.stringify(state.edits));
 }
 
+function setFilterDate(id, key, value) {
+  const f = state.filters[id];
+  f[key] = value;
+  f.quick = '';
+
+  if (f.from && f.to && f.from > f.to) {
+    if (key === 'from') f.to = f.from;
+    if (key === 'to') f.from = f.to;
+  }
+
+  const fromInput = document.getElementById(`${id}_from`);
+  const toInput = document.getElementById(`${id}_to`);
+  if (fromInput) fromInput.value = f.from;
+  if (toInput) toInput.value = f.to;
+}
+
 function csvParse(text) {
   text = String(text || '').replace(/^\uFEFF/, '');
   const rows = [];
@@ -58,33 +87,24 @@ function csvParse(text) {
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     const n = text[i + 1];
-
     if (c === '"') {
-      if (quoted && n === '"') {
-        cur += '"';
-        i++;
-      } else {
-        quoted = !quoted;
-      }
+      if (quoted && n === '"') { cur += '"'; i++; }
+      else quoted = !quoted;
     } else if (c === ',' && !quoted) {
-      row.push(cur);
-      cur = '';
+      row.push(cur); cur = '';
     } else if ((c === '\n' || c === '\r') && !quoted) {
       if (c === '\r' && n === '\n') i++;
       row.push(cur);
       if (row.some(x => x !== '')) rows.push(row);
-      row = [];
-      cur = '';
+      row = []; cur = '';
     } else {
       cur += c;
     }
   }
-
   if (cur !== '' || row.length) {
     row.push(cur);
     if (row.some(x => x !== '')) rows.push(row);
   }
-
   return rows;
 }
 
@@ -104,13 +124,11 @@ function monthsBetween(from, to) {
   const out = [];
   let y = start.getFullYear();
   let m = start.getMonth();
-
   while (y < end.getFullYear() || (y === end.getFullYear() && m <= end.getMonth())) {
     out.push(`${y}-${String(m + 1).padStart(2, '0')}`);
     m++;
     if (m > 11) { m = 0; y++; }
   }
-
   return out;
 }
 
@@ -132,7 +150,6 @@ async function ensureData(from, to) {
         state.monthCache.set(month, []);
         continue;
       }
-
       const csvUrl = assetUrl(info.file);
       const csvResponse = await fetch(csvUrl, { cache: 'no-cache' });
       if (!csvResponse.ok) throw new Error(`CSV load failed ${csvResponse.status}: ${csvUrl}`);
@@ -144,7 +161,6 @@ async function ensureData(from, to) {
   const baseRows = months.flatMap(month => state.monthCache.get(month) || []);
   const rowsWithEdits = baseRows.map(row => state.edits[row._id] ? normalizeRow({ ...row, ...state.edits[row._id] }) : row);
   const localRows = Object.values(state.edits).filter(row => row._local && row.date >= from && row.date <= to).map(normalizeRow);
-
   state.allRows = [...rowsWithEdits, ...localRows].filter(row => row.date >= from && row.date <= to);
   state.loadedRange = { from, to };
   setStatus(`${state.allRows.length} rows loaded`);
@@ -237,37 +253,24 @@ function normalizeRow(row) {
   row.airline = String(row.airline || airlineFromFlight(row.flight)).trim().toUpperCase();
   row.groundTime = row.groundTime || hh(diff(row.etd, row.eta));
   row.tat = row.tat || hh(diff(row.offC, row.onC));
-
   row._dEtd = diff(row.offC, row.etd);
   row._dStd = diff(row.aobt || row.offC, row.std);
   row._dSta = diff(row.onC, row.sta);
   row._dDoor = diff(row.dc, row.etd);
-
   row.otpETD1 = row.otpETD1 || (row._dEtd == null ? '' : row._dEtd > 0 ? 'DELAY' : 'ONTIME');
   row.otpETD15 = row.otpETD15 || (row._dEtd == null ? '' : row._dEtd > 15 ? 'DELAY' : 'ONTIME');
   row.otpSTD = row.otpSTD || (row._dStd == null ? '' : row._dStd > 15 ? 'DELAY' : 'ONTIME');
   row.otaSTA = row.otaSTA || (row._dSta == null ? '' : row._dSta > 0 ? 'DELAY' : 'ONTIME');
   row.doorEarly5 = row.doorEarly5 || (row._dDoor == null ? '' : row._dDoor <= -5 ? 'ONTIME' : 'DELAY');
-
   row._id = row.id || [row.date, row.flight, row.reg, row.route, row.std].join('|');
   return row;
 }
 
 function baseRows(id) {
   let b = state.allRows;
-
-  if (id === 'other') {
-    return b.filter(row => !isVietJet(row));
-  }
-
-  if (['otpVj', 'otaVj', 'door'].includes(id)) {
-    b = b.filter(row => isVietJet(row));
-  }
-
-  if (id === 'otaVj') {
-    b = b.filter(row => aps(row.route).length >= 3);
-  }
-
+  if (id === 'other') return b.filter(row => !isVietJet(row));
+  if (['otpVj', 'otaVj', 'door'].includes(id)) b = b.filter(row => isVietJet(row));
+  if (id === 'otaVj') b = b.filter(row => aps(row.route).length >= 3);
   return b;
 }
 
@@ -277,11 +280,7 @@ function getOrigin(id, row) {
 
 function applyFilters(id) {
   const f = state.filters[id] || state.filters.overview;
-
-  if (id === 'other' && String(f.airline || '').trim().toUpperCase() === 'VJ') {
-    f.airline = 'All';
-  }
-
+  if (id === 'other' && String(f.airline || '').trim().toUpperCase() === 'VJ') f.airline = 'All';
   return baseRows(id)
     .filter(row => row.date >= f.from && row.date <= f.to)
     .filter(row => f.market === 'All' || row.market === f.market)
@@ -302,18 +301,12 @@ function pct(value) {
   return (value || 0).toLocaleString('vi-VN', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
 }
 
-function ok(value) {
-  return value === 'ONTIME';
-}
-
-function dateLabel(f) {
-  return f.from === f.to ? f.from : `${f.from} → ${f.to}`;
-}
+function ok(value) { return value === 'ONTIME'; }
+function dateLabel(f) { return f.from === f.to ? f.from : `${f.from} → ${f.to}`; }
 
 function metrics(data) {
   const ota = data.filter(row => row.otaSTA);
   const door = data.filter(row => row.doorEarly5);
-
   return {
     total: data.length,
     etd1: data.filter(row => ok(row.otpETD1)).length,
@@ -334,21 +327,17 @@ function head(title, id) {
   const dests = uniq(b.map(row => row.destination));
   const types = uniq(b.map(row => row.type));
   let airlines = uniq(b.map(row => String(row.airline || '').trim().toUpperCase()));
-
   if (id === 'other') {
     airlines = uniq(b.map(row => String(row.airline || '').trim().toUpperCase()).filter(a => a && a !== 'VJ'));
     if (String(state.filters.other.airline || '').trim().toUpperCase() === 'VJ') state.filters.other.airline = 'All';
   }
-
-  const lastFilter = id === 'other'
-    ? select('Carrier', 'airline', airlines, f.airline, id)
-    : select('A/C Type', 'type', types, f.type, id);
-
+  const lastFilter = id === 'other' ? select('Carrier', 'airline', airlines, f.airline, id) : select('A/C Type', 'type', types, f.type, id);
   return `<div class="page-head"><div class="head-title"><h2>${title}</h2><span class="status-pill">CSV source: DataOTP</span><div class="quick-actions"><button class="${f.quick === 'today' ? 'active' : ''}" onclick="quick('${id}','today')">TODAY REPORT</button><button class="${f.quick === 'ytd' ? 'active' : ''}" onclick="quick('${id}','ytd')">YTD REPORT</button></div></div><div class="filter-row">${input('From', 'from', f.from, id)}${input('To', 'to', f.to, id)}${select('Market', 'market', ['All', 'Domestic', 'International'], f.market, id)}${select('Origin', 'origin', origins, f.origin, id)}${select('Destination', 'dest', dests, f.dest, id)}${lastFilter}<button class="apply" onclick="applyAndRender('${id}')">OK</button></div></div>`;
 }
 
 function input(label, key, value, id) {
-  return `<div class="field"><label>${label}</label><input type="date" value="${value}" onchange="state.filters.${id}.${key}=this.value;state.filters.${id}.quick='' "></div>`;
+  const domId = `${id}_${key}`;
+  return `<div class="field"><label>${label}</label><input id="${domId}" type="date" value="${value}" onchange="setFilterDate('${id}','${key}',this.value)"></div>`;
 }
 
 function select(label, key, arr, value, id) {
@@ -366,12 +355,14 @@ async function quick(id, type) {
   const f = state.filters[id];
   state.tablePages = {};
   if (type === 'today') {
-    f.from = CONFIG.defaultTo;
-    f.to = CONFIG.defaultTo;
+    const t = todayISO();
+    f.from = t;
+    f.to = t;
     f.quick = 'today';
   } else {
-    f.from = '2026-01-01';
-    f.to = CONFIG.defaultTo;
+    const t = todayISO();
+    f.from = `${new Date().getFullYear()}-01-01`;
+    f.to = t;
     f.quick = 'ytd';
   }
   await applyAndRender(id);
@@ -379,15 +370,9 @@ async function quick(id, type) {
 
 function kpis(type, m, period) {
   let rows;
-
-  if (type === 'ota') {
-    rows = [['Total', m.total], ['OTA STA', pct(m.otaTotal ? m.otaOk / m.otaTotal * 100 : 0)], ['OTA Delay', m.otaTotal - m.otaOk], ['OTP STD', pct(m.total ? m.std / m.total * 100 : 0)], ['Critical', m.critical], ['Quality', `${m.otaTotal}/${m.total}`]];
-  } else if (type === 'door') {
-    rows = [['Total', m.total], ['Door Early 5', pct(m.doorTotal ? m.doorOk / m.doorTotal * 100 : 0)], ['Late Door', m.doorTotal - m.doorOk], ['OTP ETD15', pct(m.total ? m.etd15 / m.total * 100 : 0)], ['OTP STD', pct(m.total ? m.std / m.total * 100 : 0)], ['Quality', `${m.doorTotal}/${m.total}`]];
-  } else {
-    rows = [['Total', m.total], ['OTP ETD1', pct(m.total ? m.etd1 / m.total * 100 : 0)], ['OTP ETD15', pct(m.total ? m.etd15 / m.total * 100 : 0)], ['OTP STD', pct(m.total ? m.std / m.total * 100 : 0)], ['OTA', pct(m.otaTotal ? m.otaOk / m.otaTotal * 100 : 0)], ['Critical', m.critical]];
-  }
-
+  if (type === 'ota') rows = [['Total', m.total], ['OTA STA', pct(m.otaTotal ? m.otaOk / m.otaTotal * 100 : 0)], ['OTA Delay', m.otaTotal - m.otaOk], ['OTP STD', pct(m.total ? m.std / m.total * 100 : 0)], ['Critical', m.critical], ['Quality', `${m.otaTotal}/${m.total}`]];
+  else if (type === 'door') rows = [['Total', m.total], ['Door Early 5', pct(m.doorTotal ? m.doorOk / m.doorTotal * 100 : 0)], ['Late Door', m.doorTotal - m.doorOk], ['OTP ETD15', pct(m.total ? m.etd15 / m.total * 100 : 0)], ['OTP STD', pct(m.total ? m.std / m.total * 100 : 0)], ['Quality', `${m.doorTotal}/${m.total}`]];
+  else rows = [['Total', m.total], ['OTP ETD1', pct(m.total ? m.etd1 / m.total * 100 : 0)], ['OTP ETD15', pct(m.total ? m.etd15 / m.total * 100 : 0)], ['OTP STD', pct(m.total ? m.std / m.total * 100 : 0)], ['OTA', pct(m.otaTotal ? m.otaOk / m.otaTotal * 100 : 0)], ['Critical', m.critical]];
   return `<div class="kpi-grid">${rows.map(x => `<div class="kpi"><div class="label">${x[0]}</div><div class="value">${x[1]}</div><div class="sub">${period}</div></div>`).join('')}</div>`;
 }
 
@@ -398,23 +383,19 @@ function chart(title, data, field, id) {
   const p = total ? ontime / total * 100 : 0;
   const groups = {};
   const byMarket = state.filters[id].market === 'All';
-
   data.forEach(row => {
     const k = byMarket ? row.market : (row.destination || 'N/A');
     groups[k] = groups[k] || [0, 0];
     groups[k][0]++;
     if (ok(row[field])) groups[k][1]++;
   });
-
   const bars = Object.entries(groups).map(([k, v]) => [k, v[0] ? v[1] / v[0] * 100 : 0]).sort((a, b) => b[1] - a[1]);
-
   return `<div class="card"><h3>${title}</h3><div class="donut-wrap"><div><div class="donut" style="--deg:${Math.round(p * 3.6)}deg"><strong>${pct(p)}</strong></div><div class="legend"><span><i class="sw" style="background:var(--blue)"></i>Ontime ${ontime}</span><span><i class="sw" style="background:#ffd166"></i>Delay ${delay}</span></div></div><div>${bars.map(b => { const c = b[1] >= 85 ? 'var(--green)' : b[1] >= 65 ? '#f59e0b' : '#ef4444'; return `<div class="bar"><div>${b[0]}</div><div class="track"><div class="fill" style="width:${b[1]}%;background:${c}"></div></div><div class="pill" style="background:${c}">${pct(b[1])}</div></div>`; }).join('')}</div></div></div>`;
 }
 
 function delayReasons(data) {
   const totalDelayFlights = data.filter(row => String(row.code1 || row.code2 || row.code3 || '').trim()).length;
   const map = {};
-
   data.forEach(row => {
     [['code1', 'min1'], ['code2', 'min2'], ['code3', 'min3']].forEach(pair => {
       const code = String(row[pair[0]] || '').trim();
@@ -424,7 +405,6 @@ function delayReasons(data) {
       map[code].min += toMinutes(row[pair[1]]);
     });
   });
-
   const arr = Object.values(map).sort((a, b) => b.count - a.count);
   return `<div class="card"><h3>Delay Reasons Overview</h3><div class="reason-wrap"><table class="reason-table"><thead><tr><th>CODE</th><th>SỐ CHUYẾN</th><th>SỐ PHÚT</th><th>TỈ LỆ %</th></tr></thead><tbody>${arr.map(x => `<tr><td>${x.code}</td><td>${x.count}</td><td>${x.min}</td><td>${totalDelayFlights ? pct(x.count / totalDelayFlights * 100) : '0,0%'}</td></tr>`).join('') || '<tr><td colspan="4">No delay code data</td></tr>'}</tbody></table></div></div>`;
 }
@@ -442,7 +422,6 @@ function report(id, type, title) {
   const rightField = type === 'other' ? 'otpETD1' : 'otpSTD';
   const leftTitle = type === 'ota' ? 'OTA STA Performance' : type === 'door' ? 'Door Closed Early 5' : 'OTP ETD15 Performance';
   const rightTitle = type === 'other' ? 'Other Carrier ETD1' : 'OTP STD Performance';
-
   document.getElementById(id).innerHTML = head(title, id) + kpis(type, m, period) + `<div class="main-grid">${chart(leftTitle, data, leftField, id)}${chart(rightTitle, data, rightField, id)}</div><div style="margin-top:16px">${delayReasons(data)}</div>`;
 }
 
@@ -457,23 +436,12 @@ function table(data, editable = false, pageSize = 50, tableKey = state.activeTab
   if (!Number.isFinite(page) || page < 1) page = 1;
   if (page > totalPages) page = totalPages;
   state.tablePages[tableKey] = page;
-
   const start = (page - 1) * pageSize;
   const end = Math.min(start + pageSize, totalRows);
   const shown = data.slice(start, end);
-  const safeKey = String(tableKey).replace(/'/g, "\'");
-  const pageInfo = totalRows
-    ? `Showing ${start + 1}-${end} of ${totalRows}`
-    : 'No rows';
-
-  const pager = `<div class="pager" style="display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap">
-      <button class="manual-btn" ${page <= 1 ? 'disabled' : ''} onclick="gotoTablePage('${safeKey}', 1)">First</button>
-      <button class="manual-btn" ${page <= 1 ? 'disabled' : ''} onclick="gotoTablePage('${safeKey}', ${page - 1})">Prev</button>
-      <span class="status-pill">Page ${page}/${totalPages}</span>
-      <button class="manual-btn" ${page >= totalPages ? 'disabled' : ''} onclick="gotoTablePage('${safeKey}', ${page + 1})">Next</button>
-      <button class="manual-btn" ${page >= totalPages ? 'disabled' : ''} onclick="gotoTablePage('${safeKey}', ${totalPages})">Last</button>
-    </div>`;
-
+  const safeKey = String(tableKey).replace(/'/g, "\\'");
+  const pageInfo = totalRows ? `Showing ${start + 1}-${end} of ${totalRows}` : 'No rows';
+  const pager = `<div class="pager" style="display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap"><button class="manual-btn" ${page <= 1 ? 'disabled' : ''} onclick="gotoTablePage('${safeKey}', 1)">First</button><button class="manual-btn" ${page <= 1 ? 'disabled' : ''} onclick="gotoTablePage('${safeKey}', ${page - 1})">Prev</button><span class="status-pill">Page ${page}/${totalPages}</span><button class="manual-btn" ${page >= totalPages ? 'disabled' : ''} onclick="gotoTablePage('${safeKey}', ${page + 1})">Next</button><button class="manual-btn" ${page >= totalPages ? 'disabled' : ''} onclick="gotoTablePage('${safeKey}', ${totalPages})">Last</button></div>`;
   return `<div class="card table-card"><div class="table-tools"><input placeholder="Search flight / route on this page..." oninput="filterTable(this.value)"><select onchange="filterDelay(this.value)"><option value="all">All flights on page</option><option value="delay">Delay only on page</option></select><span class="status-pill">${pageInfo}</span>${pager}</div><div class="table-wrap"><table class="smart-table" id="smartTable"><thead><tr>${cols().map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${shown.map(row => tableRow(row, editable)).join('')}</tbody></table></div></div>`;
 }
 
@@ -481,8 +449,8 @@ function gotoTablePage(tableKey, page) {
   state.tablePages[tableKey] = page;
   render(state.activeTab);
   setTimeout(() => {
-    const table = document.getElementById('smartTable');
-    if (table) table.scrollIntoView({ block: 'nearest' });
+    const tableEl = document.getElementById('smartTable');
+    if (tableEl) tableEl.scrollIntoView({ block: 'nearest' });
   }, 0);
 }
 
@@ -528,19 +496,16 @@ function gridKey(e, td) {
   if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(e.key)) return;
   e.preventDefault();
   saveCell(td);
-
   const tr = td.parentElement;
   const tbody = tr.parentElement;
   const rows = [...tbody.children];
   const cells = [...tr.querySelectorAll('td[contenteditable=true]')];
   let ci = cells.indexOf(td);
   let ri = rows.indexOf(tr);
-
   if (e.key === 'ArrowRight' || (e.key === 'Tab' && !e.shiftKey)) ci++;
   if (e.key === 'ArrowLeft' || (e.key === 'Tab' && e.shiftKey)) ci--;
   if (e.key === 'ArrowDown' || e.key === 'Enter') ri++;
   if (e.key === 'ArrowUp') ri--;
-
   ri = Math.max(0, Math.min(rows.length - 1, ri));
   const nextCells = [...rows[ri].querySelectorAll('td[contenteditable=true]')];
   ci = Math.max(0, Math.min(nextCells.length - 1, ci));
@@ -561,7 +526,7 @@ function selectText(el) {
 function inputTab() {
   const data = state.allRows.filter(row => row.date === state.inputDate);
   const fields = ['date', 'flight', 'reg', 'type', 'route', 'sta', 'std', 'eta', 'etd', 'onC', 'dc', 'offC', 'aobt'];
-  document.getElementById('input').innerHTML = `<div class="input-panel"><div class="manual-row">${fields.map(field => `<div class="manual-cell"><label>${field}</label><input id="manual_${field}" class="${field === 'route' ? 'routeInput' : ''}" ${field === 'date' ? 'type="date" value="' + state.inputDate + '" onchange="state.inputDate=this.value;render(\'input\')"' : ''}></div>`).join('')}<button class="manual-btn" onclick="clearManual()">Clear</button><button class="manual-btn primary" onclick="addFlight()">Add Flight</button></div></div>${table(data, true)}`;
+  document.getElementById('input').innerHTML = `<div class="input-panel"><div class="manual-row">${fields.map(field => `<div class="manual-cell"><label>${field}</label><input id="manual_${field}" class="${field === 'route' ? 'routeInput' : ''}" ${field === 'date' ? 'type="date" value="' + state.inputDate + '" onchange="state.inputDate=this.value;render(\'input\')"' : ''}></div>`).join('')}<button class="manual-btn" onclick="clearManual()">Clear</button><button class="manual-btn primary" onclick="addFlight()">Add Flight</button></div></div>${table(data, true, 50, 'input')}`;
 }
 
 function addFlight() {
@@ -604,23 +569,9 @@ function exportTab() {
 function analysisTab() {
   const data = applyFilters('analysis');
   const m = metrics(data);
-  const delayRows = data.filter(row =>
-    row.otpETD1 === 'DELAY' ||
-    row.otpETD15 === 'DELAY' ||
-    row.otpSTD === 'DELAY' ||
-    row.otaSTA === 'DELAY' ||
-    row.doorEarly5 === 'DELAY' ||
-    String(row.code1 || row.code2 || row.code3 || '').trim()
-  );
-
+  const delayRows = data.filter(row => row.otpETD1 === 'DELAY' || row.otpETD15 === 'DELAY' || row.otpSTD === 'DELAY' || row.otaSTA === 'DELAY' || row.doorEarly5 === 'DELAY' || String(row.code1 || row.code2 || row.code3 || '').trim());
   const performanceNotice = `<div class="notice" style="margin:16px 0"><b>Performance mode:</b> Delay Analysis đang phân tích ${data.length} dòng. Bảng chi tiết bên dưới chia trang 50 dòng/page để tránh treo trình duyệt. Các KPI và Delay Reasons Overview phía trên vẫn tính trên toàn bộ dữ liệu đã lọc.</div>`;
-
-  document.getElementById('analysis').innerHTML =
-    head('Delay Analysis', 'analysis') +
-    kpis('otp', m, dateLabel(state.filters.analysis)) +
-    delayReasons(data) +
-    performanceNotice +
-    table(delayRows, false, 50, 'analysisDelay');
+  document.getElementById('analysis').innerHTML = head('Delay Analysis', 'analysis') + kpis('otp', m, dateLabel(state.filters.analysis)) + delayReasons(data) + performanceNotice + table(delayRows, false, 50, 'analysisDelay');
 }
 
 function render(id = state.activeTab) {
@@ -637,10 +588,8 @@ function render(id = state.activeTab) {
 
 async function init() {
   console.log('VJGS OTP Static Web Build', CONFIG.version);
-
   const collapse = document.getElementById('collapseBtn');
   if (collapse) collapse.onclick = () => document.body.classList.toggle('collapsed');
-
   document.querySelectorAll('.navitem').forEach(nav => {
     nav.onclick = () => {
       document.querySelectorAll('.navitem').forEach(item => item.classList.remove('active'));
@@ -650,12 +599,10 @@ async function init() {
       render(nav.dataset.tab);
     };
   });
-
   setInterval(() => {
     const clock = document.getElementById('clock');
     if (clock) clock.textContent = new Date().toLocaleString('vi-VN');
   }, 1000);
-
   await ensureData(CONFIG.defaultFrom, CONFIG.defaultTo);
   render('overview');
 }
