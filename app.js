@@ -3,7 +3,7 @@ const CONFIG = {
   defaultFrom: '2026-08-14',
   defaultTo: '2026-08-14',
   storageKey: 'vjgs_otp_static_edits_v1',
-  version: '2026-08-18-other-carrier-fix-v3'
+  version: '2026-08-18-delay-analysis-pagination-v5'
 };
 
 const DOMESTIC = new Set('DIN THD VDH VCL TBB PXU BMV VKG CAH VCS HAN SGN DAD VDO HPH VII HUI CXR DLI UIH VCA PQC LTH'.split(' '));
@@ -15,6 +15,7 @@ const state = {
   allRows: [],
   edits: loadLocalEdits(),
   loadedRange: null,
+  tablePages: {},
   filters: {
     overview: { from: CONFIG.defaultFrom, to: CONFIG.defaultTo, market: 'All', origin: 'All', dest: 'All', type: 'All', quick: '' },
     otpVj: { from: CONFIG.defaultFrom, to: CONFIG.defaultTo, market: 'All', origin: 'All', dest: 'All', type: 'All', quick: '' },
@@ -356,12 +357,14 @@ function select(label, key, arr, value, id) {
 
 async function applyAndRender(id) {
   const f = state.filters[id];
+  state.tablePages = {};
   await ensureData(f.from, f.to);
   render(id);
 }
 
 async function quick(id, type) {
   const f = state.filters[id];
+  state.tablePages = {};
   if (type === 'today') {
     f.from = CONFIG.defaultTo;
     f.to = CONFIG.defaultTo;
@@ -447,8 +450,40 @@ function cols() {
   return ['date', 'flight', 'reg', 'type', 'route', 'sta', 'std', 'eta', 'etd', 'onC', 'dc', 'offC', 'aobt', 'groundTime', 'tat', 'otpETD1', 'otpETD15', 'otpSTD', 'otaSTA', 'doorEarly5', 'code1', 'min1', 'code2', 'min2', 'code3', 'min3', 'delayReason', 'originReport', 'originOTA', 'destination', 'market', 'airline'];
 }
 
-function table(data, editable = false) {
-  return `<div class="card table-card"><div class="table-tools"><input placeholder="Search flight / route..." oninput="filterTable(this.value)"><select onchange="filterDelay(this.value)"><option value="all">All flights</option><option value="delay">Delay only</option></select><span class="status-pill">${data.length} flights</span></div><div class="table-wrap"><table class="smart-table" id="smartTable"><thead><tr>${cols().map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${data.map(row => tableRow(row, editable)).join('')}</tbody></table></div></div>`;
+function table(data, editable = false, pageSize = 50, tableKey = state.activeTab || 'table') {
+  const totalRows = data.length;
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  let page = Number(state.tablePages[tableKey] || 1);
+  if (!Number.isFinite(page) || page < 1) page = 1;
+  if (page > totalPages) page = totalPages;
+  state.tablePages[tableKey] = page;
+
+  const start = (page - 1) * pageSize;
+  const end = Math.min(start + pageSize, totalRows);
+  const shown = data.slice(start, end);
+  const safeKey = String(tableKey).replace(/'/g, "\'");
+  const pageInfo = totalRows
+    ? `Showing ${start + 1}-${end} of ${totalRows}`
+    : 'No rows';
+
+  const pager = `<div class="pager" style="display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap">
+      <button class="manual-btn" ${page <= 1 ? 'disabled' : ''} onclick="gotoTablePage('${safeKey}', 1)">First</button>
+      <button class="manual-btn" ${page <= 1 ? 'disabled' : ''} onclick="gotoTablePage('${safeKey}', ${page - 1})">Prev</button>
+      <span class="status-pill">Page ${page}/${totalPages}</span>
+      <button class="manual-btn" ${page >= totalPages ? 'disabled' : ''} onclick="gotoTablePage('${safeKey}', ${page + 1})">Next</button>
+      <button class="manual-btn" ${page >= totalPages ? 'disabled' : ''} onclick="gotoTablePage('${safeKey}', ${totalPages})">Last</button>
+    </div>`;
+
+  return `<div class="card table-card"><div class="table-tools"><input placeholder="Search flight / route on this page..." oninput="filterTable(this.value)"><select onchange="filterDelay(this.value)"><option value="all">All flights on page</option><option value="delay">Delay only on page</option></select><span class="status-pill">${pageInfo}</span>${pager}</div><div class="table-wrap"><table class="smart-table" id="smartTable"><thead><tr>${cols().map(x => `<th>${x}</th>`).join('')}</tr></thead><tbody>${shown.map(row => tableRow(row, editable)).join('')}</tbody></table></div></div>`;
+}
+
+function gotoTablePage(tableKey, page) {
+  state.tablePages[tableKey] = page;
+  render(state.activeTab);
+  setTimeout(() => {
+    const table = document.getElementById('smartTable');
+    if (table) table.scrollIntoView({ block: 'nearest' });
+  }, 0);
 }
 
 function tableRow(row, editable) {
@@ -569,7 +604,23 @@ function exportTab() {
 function analysisTab() {
   const data = applyFilters('analysis');
   const m = metrics(data);
-  document.getElementById('analysis').innerHTML = head('Delay Analysis', 'analysis') + kpis('otp', m, dateLabel(state.filters.analysis)) + delayReasons(data) + table(data, false);
+  const delayRows = data.filter(row =>
+    row.otpETD1 === 'DELAY' ||
+    row.otpETD15 === 'DELAY' ||
+    row.otpSTD === 'DELAY' ||
+    row.otaSTA === 'DELAY' ||
+    row.doorEarly5 === 'DELAY' ||
+    String(row.code1 || row.code2 || row.code3 || '').trim()
+  );
+
+  const performanceNotice = `<div class="notice" style="margin:16px 0"><b>Performance mode:</b> Delay Analysis đang phân tích ${data.length} dòng. Bảng chi tiết bên dưới chia trang 50 dòng/page để tránh treo trình duyệt. Các KPI và Delay Reasons Overview phía trên vẫn tính trên toàn bộ dữ liệu đã lọc.</div>`;
+
+  document.getElementById('analysis').innerHTML =
+    head('Delay Analysis', 'analysis') +
+    kpis('otp', m, dateLabel(state.filters.analysis)) +
+    delayReasons(data) +
+    performanceNotice +
+    table(delayRows, false, 50, 'analysisDelay');
 }
 
 function render(id = state.activeTab) {
