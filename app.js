@@ -137,7 +137,34 @@ function normalizeRow(r){
   r._id = r.id || [r.date,r.flight,r.reg,r.route,r.std].join('|');
   return r;
 }
-function baseRows(id){let b=state.allRows; if(id==='other')return b.filter(r=>!r.flight.startsWith('VJ')); if(['otpVj','otaVj','door'].includes(id))b=b.filter(r=>r.flight.startsWith('VJ')); if(id==='otaVj')b=b.filter(r=>aps(r.route).length>=3); return b;}
+function isVietJet(r) {
+  const airline = String(r.airline || '').trim().toUpperCase();
+  const flight = String(r.flight || '')
+    .trim()
+    .toUpperCase()
+    .replace('____/', '')
+    .replace(/^[_\s\-–—]+\/?/, '');
+
+  return airline === 'VJ' || /^VJ\d+/.test(flight) || /\/VJ\d+/.test(flight);
+}
+
+function baseRows(id) {
+  let b = state.allRows;
+
+  if (id === 'other') {
+    return b.filter(r => !isVietJet(r));
+  }
+
+  if (['otpVj', 'otaVj', 'door'].includes(id)) {
+    b = b.filter(r => isVietJet(r));
+  }
+
+  if (id === 'otaVj') {
+    b = b.filter(r => aps(r.route).length >= 3);
+  }
+
+  return b;
+}
 function getOrigin(id,r){return id==='otaVj'?r.originOTA:r.originReport}
 function applyFilters(id){const f=state.filters[id]||state.filters.overview; return baseRows(id).filter(r=>r.date>=f.from&&r.date<=f.to).filter(r=>f.market==='All'||r.market===f.market).filter(r=>f.origin==='All'||getOrigin(id,r)===f.origin).filter(r=>f.dest==='All'||r.destination===f.dest).filter(r=>!f.type||f.type==='All'||r.type===f.type).filter(r=>!f.airline||f.airline==='All'||r.airline===f.airline);}
 function uniq(arr){return ['All',...Array.from(new Set(arr.filter(Boolean))).sort()]}
