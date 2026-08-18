@@ -1,5 +1,5 @@
 const CONFIG = {
-  dataIndex: 'DataOTP/otp_2026_index.json',
+  dataIndex: './DataOTP/otp_2026_index.json',
   defaultFrom: '2026-08-14',
   defaultTo: '2026-08-14',
   storageKey: 'vjgs_otp_static_edits_v1'
@@ -23,6 +23,11 @@ const state = {
   },
   inputDate: CONFIG.defaultTo
 };
+function assetUrl(path) {
+  const cleanPath = String(path || '').replace(/^\.?\//, '');
+  const baseUrl = new URL('./', window.location.href);
+  return new URL(cleanPath, baseUrl).href;
+}
 function setStatus(t){document.getElementById('loadStatus').textContent=t;}
 function loadLocalEdits(){try{return JSON.parse(localStorage.getItem(CONFIG.storageKey)||'{}')}catch(e){return {}}}
 function saveLocalEdits(){localStorage.setItem(CONFIG.storageKey,JSON.stringify(state.edits));}
@@ -49,21 +54,62 @@ function monthsBetween(from,to){
   while(y<b.getFullYear() || (y===b.getFullYear()&&m<=b.getMonth())){out.push(`${y}-${String(m+1).padStart(2,'0')}`);m++;if(m>11){m=0;y++;}}
   return out;
 }
-async function ensureData(from,to){
-  if(!Object.keys(state.index).length){ const r=await fetch(CONFIG.dataIndex,{cache:'no-cache'}); state.index=await r.json(); }
-  const months=monthsBetween(from,to); setStatus(`Loading ${months.join(', ')}`);
-  for(const m of months){
-    if(!state.monthCache.has(m)){
-      const info=state.index[m]; if(!info) {state.monthCache.set(m,[]); continue;}
-      const r=await fetch(info.file,{cache:'no-cache'}); if(!r.ok) throw new Error(`Cannot load ${info.file}`);
-      const text=await r.text(); state.monthCache.set(m, rowsFromCsv(text));
+async function ensureData(from, to) {
+  if (!Object.keys(state.index).length) {
+    const indexUrl = assetUrl(CONFIG.dataIndex);
+    console.log('Loading index:', indexUrl);
+
+    const indexResponse = await fetch(indexUrl, { cache: 'no-cache' });
+
+    if (!indexResponse.ok) {
+      throw new Error(`Index load failed ${indexResponse.status}: ${indexUrl}`);
+    }
+
+    state.index = await indexResponse.json();
+  }
+
+  const months = monthsBetween(from, to);
+  setStatus(`Loading ${months.join(', ')}`);
+
+  for (const month of months) {
+    if (!state.monthCache.has(month)) {
+      const info = state.index[month];
+
+      if (!info || !info.file) {
+        console.warn('No data file for month:', month);
+        state.monthCache.set(month, []);
+        continue;
+      }
+
+      const csvUrl = assetUrl(info.file);
+      console.log('Loading CSV:', csvUrl);
+
+      const csvResponse = await fetch(csvUrl, { cache: 'no-cache' });
+
+      if (!csvResponse.ok) {
+        throw new Error(`CSV load failed ${csvResponse.status}: ${csvUrl}`);
+      }
+
+      const csvText = await csvResponse.text();
+      state.monthCache.set(month, rowsFromCsv(csvText));
     }
   }
-  const base=months.flatMap(m=>state.monthCache.get(m)||[]);
-  const rows=base.map(r=>state.edits[r._id]?normalizeRow({...r,...state.edits[r._id]}):r);
-  const local=Object.values(state.edits).filter(r=>r._local && r.date>=from && r.date<=to).map(normalizeRow);
-  state.allRows=[...rows,...local].filter(r=>r.date>=from&&r.date<=to);
-  state.loadedRange={from,to}; setStatus(`${state.allRows.length} rows loaded`);
+
+  const baseRows = months.flatMap(month => state.monthCache.get(month) || []);
+
+  const rowsWithEdits = baseRows.map(row =>
+    state.edits[row._id] ? normalizeRow({ ...row, ...state.edits[row._id] }) : row
+  );
+
+  const localRows = Object.values(state.edits)
+    .filter(row => row._local && row.date >= from && row.date <= to)
+    .map(normalizeRow);
+
+  state.allRows = [...rowsWithEdits, ...localRows]
+    .filter(row => row.date >= from && row.date <= to);
+
+  state.loadedRange = { from, to };
+  setStatus(`${state.allRows.length} rows loaded`);
 }
 function aps(route){return String(route||'').toUpperCase().replace(/--/g,'-').replace(/\s+/g,'').split('-').filter(Boolean)}
 function originReport(route){const p=aps(route);return p.length>=3?p[1]:(p[0]||'')}
@@ -132,4 +178,17 @@ async function init(){
   setInterval(()=>document.getElementById('clock').textContent=new Date().toLocaleString('vi-VN'),1000);
   await ensureData(CONFIG.defaultFrom,CONFIG.defaultTo); render('overview');
 }
-init().catch(e=>{console.error(e);setStatus('Error loading CSV');document.getElementById('overview').innerHTML=`<div class="notice">Không tải được DataOTP. Kiểm tra cấu trúc folder DataOTP/otp_2026_index.json và DataOTP/2026/*.csv khi đưa lên GitHub Pages.</div>`});
+init().catch(e => {
+  console.error(e);
+  setStatus('Error loading CSV');
+
+  document.getElementById('overview').innerHTML = `
+    <div class="notice">
+      <b>Không tải được DataOTP.</b><br>
+      Lỗi kỹ thuật: ${e.message}<br><br>
+      Hãy kiểm tra trực tiếp các đường dẫn sau:<br>
+      <code>./DataOTP/otp_2026_index.json</code><br>
+      <code>./DataOTP/2026/otp_2026_08.csv</code>
+    </div>
+  `;
+});
