@@ -1,7 +1,7 @@
 // Trợ lý Vạn Kiếp Tu Tiên — mức 1 (chỉ tính toán, không tự bấm).
 // Chạy bên trong trang game: tự tải code hiện tại của game và dùng lại các hàm tính toán của chính game.
-// 2.11.0 (21/11/2025): bám lại bản game đổi sang lớp dịch h()/v() và đổi tên hàm — sửa 13 mốc.
-const TOOL_VER = '2.11.0';
+// 2.12.0 (23/11/2025): bám lại bản game 23/11 (bundle index-ymFk8qPB.js, có màn chọn ngôn ngữ) — sửa 4 mốc.
+const TOOL_VER = '2.12.0';
 
 (() => {
   if (window.__vkTroLy) { window.__vkTroLy.show(); return; }
@@ -13,7 +13,7 @@ const TOOL_VER = '2.11.0';
     eJ:  [/\.doDung\)!=null&&/, 'mô phỏng trận'],
     Vr:  [/\{ten:[\w$]+\.ten,drugResistTran:\{\},drugRetention:/, 'chỉ số nhân vật khi đánh'],
     Ga:  [/muc\?\?"thuong",\w=\w\.canh_gioi/, 'dựng quái'],
-    Rt:  [/const [\w$]+=rs\([\w$]+,[\w$]+\),[\w$]+=[\w$]+\.kinhMach/, 'tính kinh mạch'],
+    Rt:  [/const [\w$]+=[\w$]+\([\w$]+,[\w$]+\),[\w$]+=[\w$]+\.kinhMach,[\w$]+=[\w$]+\.natal/, 'tính kinh mạch'],
     Tp:  ['.khuon.split(', 'khuôn kinh mạch'],
     al:  [/\(\w\.hinh\?\?\[\],\w\.xoay\)/, 'ô của mảnh'],
     Jh:  ['Món này đã có trên kinh mạch', 'kiểm tra chỗ đặt'],
@@ -32,20 +32,20 @@ const TOOL_VER = '2.11.0';
   const REGEX_NAMES = {
     rn: [/function ([\w$]+)\(([\w$]+)\)\{return [\w$]+\[Math\.max\(0,Math\.min\([\w$]+,\2\)\)\]\}/, 'bảng cảnh giới'],
     fn: [/class ([\w$]+)\{constructor\(([\w$]+)\)\{this\.state=\2\}static fromSeed/, 'bộ số ngẫu nhiên'],
-    No: [/([\w$]+)=\$\(\[v\("Tạp dịch"\),v\("Ngoại môn"\)/, 'tên cấp bậc tông môn'],
+    No: [/([\w$]+)=[\w$]+\(\[v\("Tạp dịch"\),v\("Ngoại môn"\)/, 'tên cấp bậc tông môn'],
     E1: [/function ([\w$]+)\(([\w$]+),([\w$]+),([\w$]+),([\w$]+)=0\)\{return [\w$]+\(\2,\3,\4,[\w$]+\(\2,\3,"buy",\5\)\)\}/, 'giá mua'],
     gP: [/if\(!([\w$]+)\([\w$]+,[\w$]+\)\)throw new Error\(h\("Nơi đó còn phủ mây/, 'vùng đã khám phá'],
   };
 
   // Hàm cho tính năng phụ: thiếu thì chỉ tính năng đó tắt, phần còn lại vẫn chạy.
   const ANCHORS_OPT = {
-    to:  [/const [\w$]+=n\.run,[\w$]+=[\w$]+\.viTri,[\w$]+=XY\([\w$]+,[\w$]+\),[\w$]+=Vde\[[\w$]+\]/, 'thông tin bế quan'],
+    to:  [/const [\w$]+=n\.run,[\w$]+=[\w$]+\.viTri,[\w$]+=[\w$]+\(n,[\w$]+\),[\w$]+=[\w$]+\[[\w$]+\]/, 'thông tin bế quan'],
     qw:  [/\.untilExhausted&&!/, 'tu vi còn thiếu'],
     Nb:  [/return [\w$]+\([\w$]+\.run\.nhanVat,[\w$]+,[\w$]+,[\w$]+\.tuViNam\/\(/, 'tu vi theo số năm'],
     Di:  [/\*[\w$]+\.cultivationSpeed\}const /, 'tốc độ tu luyện'],
     jan: ['{ten:h("Trường thi"),diem:0}', 'thi nghề'],
     bb:  ['h("đã tới bậc cao nhất")];const', 'điều kiện thi nghề'],
-    Lu:  ['const o=_yn(t,i.nghe),r=vyn(n,e)', 'luyện chế'],
+    Lu:  [/donPhuong\.get\(e\.dp\);if\(![\w$]+\)return;const [\w$]+=[\w$]+\(t,[\w$]+\.nghe\)/, 'luyện chế'],
     Pw:  [/ten:h\("Chỉ số \(/, 'điểm luyện chế'],
     Rrn: [/\.treoThuong&&\w\.nam-\w\.treoThuong\.nam</, 'bảng treo thưởng'],
     KI:  [/\.namBongLoc\)\),\[\w,\w\]=/, 'bổng lộc'],
